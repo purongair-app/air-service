@@ -71,3 +71,74 @@ fs.writeFileSync(
   '  </main>;\n' +
   '}\n'
 );
+
+
+// Staging-only: show technician workflow controls on the assigned job detail page.
+const techDir=path.join("app","technician","jobs","[id]");
+const techPage=path.join(techDir,"page.tsx");
+const techOriginal=path.join(techDir,"original-page.tsx");
+if(fs.existsSync(techPage) && !fs.existsSync(techOriginal)){
+  fs.renameSync(techPage,techOriginal);
+  fs.writeFileSync(path.join(techDir,"status-actions.ts"),\`"use server";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+
+export async function setTechnicianStatus(formData: FormData) {
+  const jobId=String(formData.get("job_id")||"");
+  const status=String(formData.get("status")||"");
+  if(!/^[a-f0-9-]{36}$/i.test(jobId)) throw new Error("Invalid job");
+  if(!["traveling","in_progress","waiting_parts","technician_submitted"].includes(status)) throw new Error("Invalid status");
+  const supabase=await createClient();
+  const {data:{user}}=await supabase.auth.getUser();
+  if(!user) redirect("/login");
+  const {error}=await supabase.rpc("technician_set_job_status",{p_job:jobId,p_status:status});
+  if(error) throw new Error("Unable to update job status: "+error.message);
+  redirect("/technician/jobs/"+jobId);
+}
+\`);
+  fs.writeFileSync(techPage,\`import OriginalJobPage from "./original-page";
+import { createClient } from "@/lib/supabase/server";
+import { setTechnicianStatus } from "./status-actions";
+
+export default async function TechnicianJobPage(props: {params: Promise<{id:string}>}) {
+  const {id}=await props.params;
+  const supabase=await createClient();
+  const {data:{user}}=await supabase.auth.getUser();
+  let allowed=false;
+  let status="";
+  if(user){
+    const {data:membership}=await supabase.from("organization_members").select("employee_id,role,status").eq("user_id",user.id).eq("role","technician").eq("status","active").maybeSingle();
+    if(membership?.employee_id){
+      const {data:assignment}=await supabase.from("job_assignments").select("accepted_at").eq("job_id",id).eq("employee_id",membership.employee_id).maybeSingle();
+      allowed=Boolean(assignment?.accepted_at);
+      if(allowed){
+        const {data:job}=await supabase.from("jobs").select("status").eq("id",id).maybeSingle();
+        status=job?.status||"";
+      }
+    }
+  }
+  const transitions: Record<string,{status:string,label:string}[]>={
+    new:[{status:"traveling",label:"ออกเดินทาง"}],
+    assigned:[{status:"traveling",label:"ออกเดินทาง"}],
+    scheduled:[{status:"traveling",label:"ออกเดินทาง"}],
+    traveling:[{status:"in_progress",label:"เริ่มงาน"}],
+    in_progress:[{status:"waiting_parts",label:"รออะไหล่"},{status:"technician_submitted",label:"ส่งงานให้ตรวจรับ"}],
+    waiting_parts:[{status:"in_progress",label:"ทำงานต่อ"},{status:"technician_submitted",label:"ส่งงานให้ตรวจรับ"}]
+  };
+  return <>
+    <OriginalJobPage {...props}/>
+    {allowed && Boolean(transitions[status]?.length) && <section className="card" style={{padding:24,margin:"24px"}}>
+      <h2>สถานะการปฏิบัติงาน</h2>
+      <p>สถานะปัจจุบัน: {status}</p>
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:12}}>
+        {transitions[status].map(item=><form action={setTechnicianStatus} key={item.status}>
+          <input type="hidden" name="job_id" value={id}/>
+          <input type="hidden" name="status" value={item.status}/>
+          <button className="btn primary" type="submit">{item.label}</button>
+        </form>)}
+      </div>
+    </section>}
+  </>;
+}
+\`);
+}
