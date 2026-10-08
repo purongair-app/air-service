@@ -79,7 +79,7 @@ const techPage=path.join(techDir,"page.tsx");
 const techOriginal=path.join(techDir,"original-page.tsx");
 if(fs.existsSync(techPage) && !fs.existsSync(techOriginal)){
   fs.renameSync(techPage,techOriginal);
-  fs.writeFileSync(path.join(techDir,"status-actions.ts"),\`"use server";
+  fs.writeFileSync(path.join(techDir,"status-actions.ts"),`"use server";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -95,8 +95,8 @@ export async function setTechnicianStatus(formData: FormData) {
   if(error) throw new Error("Unable to update job status: "+error.message);
   redirect("/technician/jobs/"+jobId);
 }
-\`);
-  fs.writeFileSync(techPage,\`import OriginalJobPage from "./original-page";
+`);
+  fs.writeFileSync(techPage,`import OriginalJobPage from "./original-page";
 import { createClient } from "@/lib/supabase/server";
 import { setTechnicianStatus } from "./status-actions";
 
@@ -140,5 +140,5 @@ export default async function TechnicianJobPage(props: {params: Promise<{id:stri
     </section>}
   </>;
 }
-\`);
+`);
 }
