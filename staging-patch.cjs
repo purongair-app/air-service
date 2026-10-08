@@ -20,3 +20,11 @@ users=users.replace(
   "list.users.find((u:any)=>u.email?.toLowerCase()===email)"
 );
 fs.writeFileSync(usersPath,users);
+
+const proxyPath=path.join("lib","supabase","proxy.ts");
+let proxy=fs.readFileSync(proxyPath,"utf8");
+proxy=proxy.replace(
+  'if (!signedIn && !path.startsWith("/login") && !path.startsWith("/auth")) {',
+  'const isPublicPath = path.startsWith("/login") || path.startsWith("/auth") || path === "/api/health" || path.startsWith("/supplier/rfq/") || path === "/manifest.webmanifest" || path === "/sw.js";\\n\\n  if (!signedIn && !isPublicPath) {'
+);
+fs.writeFileSync(proxyPath,proxy);
