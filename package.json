@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "postinstall": "cat source.part* | tr -d '\\n' | base64 -d > /tmp/airfriend-source.tar.gz && tar -xzf /tmp/airfriend-source.tar.gz",
+    "postinstall": "tar -xzf source.tar.gz",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
