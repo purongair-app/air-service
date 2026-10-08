@@ -125,3 +125,49 @@ export default async function Page({params}:{params:Promise<{id:string}>}){
   </main>;
 }
 `);
+
+
+// Staging Owner job acceptance flow (isolated route).
+const reviewDir=path.join("app","management","review","[id]");
+fs.mkdirSync(reviewDir,{recursive:true});
+fs.writeFileSync(path.join(reviewDir,"actions.ts"), `"use server";
+import {redirect} from "next/navigation";
+import {createClient} from "@/lib/supabase/server";
+export async function reviewJob(formData:FormData) {
+ const id=String(formData.get("job")||"");
+ const action=String(formData.get("action")||"");
+ if(!/^[0-9a-f-]{36}$/i.test(id)||!["review","complete"].includes(action))throw new Error("Invalid input");
+ const supabase=await createClient();
+ const {data:{user}}=await supabase.auth.getUser();
+ if(!user)redirect("/login");
+ const {error}=await supabase.rpc("management_review_job",{p_job:id,p_action:action});
+ if(error)throw new Error("Review failed: "+error.message);
+ redirect("/management/review/"+id);
+}
+`);
+fs.writeFileSync(path.join(reviewDir,"page.tsx"), `import Link from "next/link";
+import {redirect} from "next/navigation";
+import {createClient} from "@/lib/supabase/server";
+import {reviewJob} from "./actions";
+export default async function Page({params}:{params:Promise<{id:string}>}){
+ const {id}=await params;
+ const s=await createClient();
+ const {data:{user}}=await s.auth.getUser();
+ if(!user)redirect("/login");
+ const {data:j}=await s.from("jobs").select("work_no,status,organization_id,completed_at").eq("id",id).maybeSingle();
+ if(!j)return <main style={{padding:30}}><h1>ไม่พบใบงานที่เข้าถึงได้</h1></main>;
+ const {data:m,error:memberError}=await s.from("organization_members").select("role").eq("user_id",user.id).eq("organization_id",j.organization_id).eq("status","active").in("role",["owner","manager","admin"]).limit(1);
+ if(memberError||!m?.length)return <main style={{padding:30}}><h1>ไม่มีสิทธิ์ตรวจรับใบงาน</h1></main>;
+ const action=j.status==="technician_submitted"?"review":j.status==="under_review"?"complete":null;
+ return <main style={{maxWidth:700,margin:"40px auto",padding:28,background:"white",borderRadius:16}}>
+   <h1>Owner ตรวจรับงาน</h1><p>ใบงาน: {j.work_no}</p><p>สถานะ: {j.status}</p>
+   {j.completed_at&&<p>ปิดงานเมื่อ: {new Date(j.completed_at).toLocaleString("th-TH")}</p>}
+   {action&&<form action={reviewJob}>
+     <input type="hidden" name="job" value={id}/><input type="hidden" name="action" value={action}/>
+     <button className="btn primary" type="submit">{action==="review"?"รับเข้าตรวจสอบ":"อนุมัติและปิดงาน"}</button>
+   </form>}
+   {!action&&<p>ไม่มีการดำเนินการที่อนุญาตในสถานะนี้</p>}
+   <p style={{marginTop:24}}><Link href={"/jobs/"+id}>กลับไปใบงาน</Link></p>
+ </main>;
+}
+`);
