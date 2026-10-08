@@ -73,72 +73,55 @@ fs.writeFileSync(
 );
 
 
-// Staging-only: show technician workflow controls on the assigned job detail page.
-const techDir=path.join("app","technician","jobs","[id]");
-const techPage=path.join(techDir,"page.tsx");
-const techOriginal=path.join(techDir,"original-page.tsx");
-if(fs.existsSync(techPage) && !fs.existsSync(techOriginal)){
-  fs.renameSync(techPage,techOriginal);
-  fs.writeFileSync(path.join(techDir,"status-actions.ts"),`"use server";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-
-export async function setTechnicianStatus(formData: FormData) {
-  const jobId=String(formData.get("job_id")||"");
+// Isolated technician status page without changing the original job details route.
+const statusDir=path.join("app","technician","status","[id]");
+fs.mkdirSync(statusDir,{recursive:true});
+fs.writeFileSync(path.join(statusDir,"actions.ts"), `"use server";
+import {redirect} from "next/navigation";
+import {createClient} from "@/lib/supabase/server";
+export async function transition(formData:FormData) {
+  const job=String(formData.get("job")||"");
   const status=String(formData.get("status")||"");
-  if(!/^[a-f0-9-]{36}$/i.test(jobId)) throw new Error("Invalid job");
-  if(!["traveling","in_progress","waiting_parts","technician_submitted"].includes(status)) throw new Error("Invalid status");
+  if(!/^[a-f0-9-]{36}$/i.test(job) || !["traveling","in_progress","waiting_parts","technician_submitted"].includes(status))throw new Error("Invalid request");
   const supabase=await createClient();
   const {data:{user}}=await supabase.auth.getUser();
-  if(!user) redirect("/login");
-  const {error}=await supabase.rpc("technician_set_job_status",{p_job:jobId,p_status:status});
-  if(error) throw new Error("Unable to update job status: "+error.message);
-  redirect("/technician/jobs/"+jobId);
+  if(!user)redirect("/login");
+  const {error}=await supabase.rpc("technician_set_job_status",{p_job:job,p_status:status});
+  if(error)throw new Error("Update failed: "+error.message);
+  redirect("/technician/status/"+job);
 }
 `);
-  fs.writeFileSync(techPage,`import OriginalJobPage from "./original-page";
-import { createClient } from "@/lib/supabase/server";
-import { setTechnicianStatus } from "./status-actions";
-
-export default async function TechnicianJobPage(props: {params: Promise<{id:string}>}) {
-  const {id}=await props.params;
-  const supabase=await createClient();
-  const {data:{user}}=await supabase.auth.getUser();
-  let allowed=false;
-  let status="";
-  if(user){
-    const {data:membership}=await supabase.from("organization_members").select("employee_id,role,status").eq("user_id",user.id).eq("role","technician").eq("status","active").maybeSingle();
-    if(membership?.employee_id){
-      const {data:assignment}=await supabase.from("job_assignments").select("accepted_at").eq("job_id",id).eq("employee_id",membership.employee_id).maybeSingle();
-      allowed=Boolean(assignment?.accepted_at);
-      if(allowed){
-        const {data:job}=await supabase.from("jobs").select("status").eq("id",id).maybeSingle();
-        status=job?.status||"";
-      }
-    }
-  }
-  const transitions: Record<string,{status:string,label:string}[]>={
-    new:[{status:"traveling",label:"ออกเดินทาง"}],
-    assigned:[{status:"traveling",label:"ออกเดินทาง"}],
-    scheduled:[{status:"traveling",label:"ออกเดินทาง"}],
-    traveling:[{status:"in_progress",label:"เริ่มงาน"}],
-    in_progress:[{status:"waiting_parts",label:"รออะไหล่"},{status:"technician_submitted",label:"ส่งงานให้ตรวจรับ"}],
-    waiting_parts:[{status:"in_progress",label:"ทำงานต่อ"},{status:"technician_submitted",label:"ส่งงานให้ตรวจรับ"}]
+fs.writeFileSync(path.join(statusDir,"page.tsx"), `import Link from "next/link";
+import {createClient} from "@/lib/supabase/server";
+import {redirect,notFound} from "next/navigation";
+import {transition} from "./actions";
+export default async function Page({params}:{params:Promise<{id:string}>}){
+  const {id}=await params;
+  const s=await createClient();
+  const {data:{user}}=await s.auth.getUser();
+  if(!user)redirect("/login");
+  const {data:member}=await s.from("organization_members").select("employee_id").eq("user_id",user.id).eq("role","technician").eq("status","active").maybeSingle();
+  if(!member?.employee_id)notFound();
+  const {data:a}=await s.from("job_assignments").select("accepted_at").eq("job_id",id).eq("employee_id",member.employee_id).maybeSingle();
+  if(!a?.accepted_at)notFound();
+  const {data:j}=await s.from("jobs").select("work_no,status").eq("id",id).maybeSingle();
+  if(!j)notFound();
+  const actions:Record<string,{code:string,label:string}[]>={
+    new:[{code:"traveling",label:"ออกเดินทาง"}],assigned:[{code:"traveling",label:"ออกเดินทาง"}],scheduled:[{code:"traveling",label:"ออกเดินทาง"}],
+    traveling:[{code:"in_progress",label:"เริ่มงาน"}],
+    in_progress:[{code:"waiting_parts",label:"รออะไหล่"},{code:"technician_submitted",label:"ส่งงานให้ตรวจรับ"}],
+    waiting_parts:[{code:"in_progress",label:"ทำงานต่อ"},{code:"technician_submitted",label:"ส่งงานให้ตรวจรับ"}]
   };
-  return <>
-    <OriginalJobPage {...props}/>
-    {allowed && Boolean(transitions[status]?.length) && <section className="card" style={{padding:24,margin:"24px"}}>
-      <h2>สถานะการปฏิบัติงาน</h2>
-      <p>สถานะปัจจุบัน: {status}</p>
-      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:12}}>
-        {transitions[status].map(item=><form action={setTechnicianStatus} key={item.status}>
-          <input type="hidden" name="job_id" value={id}/>
-          <input type="hidden" name="status" value={item.status}/>
-          <button className="btn primary" type="submit">{item.label}</button>
-        </form>)}
-      </div>
-    </section>}
-  </>;
+  return <main style={{maxWidth:650,margin:"40px auto",padding:24,background:"white",borderRadius:16}}>
+    <h1>สถานะการปฏิบัติงาน</h1>
+    <p>ใบงาน: {j.work_no}</p><p>สถานะ: {j.status}</p>
+    <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+      {(actions[j.status]||[]).map(x=><form action={transition} key={x.code}>
+        <input type="hidden" name="job" value={id}/><input type="hidden" name="status" value={x.code}/>
+        <button className="btn primary" type="submit">{x.label}</button>
+      </form>)}
+    </div>
+    <p style={{marginTop:24}}><Link href={"/technician/jobs/"+id}>กลับหน้ารายละเอียดใบงาน</Link></p>
+  </main>;
 }
 `);
-}
