@@ -93,7 +93,7 @@ export async function transition(formData:FormData) {
 `);
 fs.writeFileSync(path.join(statusDir,"page.tsx"), `import Link from "next/link";
 import {createClient} from "@/lib/supabase/server";
-import {redirect,notFound} from "next/navigation";
+import {redirect} from "next/navigation";
 import {transition} from "./actions";
 export default async function Page({params}:{params:Promise<{id:string}>}){
   const {id}=await params;
@@ -101,11 +101,11 @@ export default async function Page({params}:{params:Promise<{id:string}>}){
   const {data:{user}}=await s.auth.getUser();
   if(!user)redirect("/login");
   const {data:member}=await s.from("organization_members").select("employee_id").eq("user_id",user.id).eq("role","technician").eq("status","active").maybeSingle();
-  if(!member?.employee_id)notFound();
+  if(!member?.employee_id)return <main><h1>ไม่พบสิทธิ์ช่างสำหรับบัญชีนี้</h1></main>;
   const {data:a}=await s.from("job_assignments").select("accepted_at").eq("job_id",id).eq("employee_id",member.employee_id).maybeSingle();
-  if(!a?.accepted_at)notFound();
+  if(!a?.accepted_at)return <main><h1>ยังไม่พบการรับงานของช่าง</h1></main>;
   const {data:j}=await s.from("jobs").select("work_no,status").eq("id",id).maybeSingle();
-  if(!j)notFound();
+  if(!j)return <main><h1>ไม่พบใบงานที่เปิดได้</h1></main>;
   const actions:Record<string,{code:string,label:string}[]>={
     new:[{code:"traveling",label:"ออกเดินทาง"}],assigned:[{code:"traveling",label:"ออกเดินทาง"}],scheduled:[{code:"traveling",label:"ออกเดินทาง"}],
     traveling:[{code:"in_progress",label:"เริ่มงาน"}],
